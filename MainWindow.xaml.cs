@@ -19,10 +19,14 @@ namespace WordleApp
         private int currentCol = 0;
         private string targetWord = "XXXXX";
         private List<string> fiveLetterWords = new List<string>();
-        private List<string> incorrectLetters = new List<string>();
+
+        // Listy śledzące stan liter na klawiaturze
+        private List<string> correctLetters = new List<string>();   // Zielone
+        private List<string> partialLetters = new List<string>();   // Pomarańczowe/Żółte
+        private List<string> incorrectLetters = new List<string>(); // Czarne
+
         private Border[,] tiles = new Border[6, 5];
         private TextBlock[,] textBlocks = new TextBlock[6, 5];
-        private Dictionary<string, Button> keyboardButtons = new Dictionary<string, Button>();
         private bool gameOver = false;
         private DispatcherTimer toastTimer;
 
@@ -30,7 +34,6 @@ namespace WordleApp
         {
             InitializeComponent();
             InitializeBoard();
-            RegisterButtons(this);
             LoadWordsFromTxt();
 
             toastTimer = new DispatcherTimer();
@@ -70,32 +73,6 @@ namespace WordleApp
                     textBlocks[r, c] = (TextBlock)border.Child;
                     BoardGrid.Children.Add(border);
                 }
-            }
-        }
-
-        private void RegisterButtons(DependencyObject parent)
-        {
-            for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
-            {
-                var child = VisualTreeHelper.GetChild(parent, i);
-                if (child is Button btn)
-                {
-                    string key = null;
-                    if (btn.Tag is string tag && !string.IsNullOrEmpty(tag))
-                    {
-                        key = tag.ToUpperInvariant();
-                    }
-                    else if (btn.Content is string content && !string.IsNullOrEmpty(content))
-                    {
-                        key = content.ToUpperInvariant();
-                    }
-
-                    if (!string.IsNullOrEmpty(key))
-                    {
-                        keyboardButtons[key] = btn;
-                    }
-                }
-                RegisterButtons(child);
             }
         }
 
@@ -179,7 +156,12 @@ namespace WordleApp
             currentRow = 0;
             currentCol = 0;
             gameOver = false;
+
+            // Czyszczenie list stanów liter
+            correctLetters.Clear();
+            partialLetters.Clear();
             incorrectLetters.Clear();
+
             EndGameGrid.Visibility = Visibility.Collapsed;
 
             for (int r = 0; r < 6; r++)
@@ -191,12 +173,21 @@ namespace WordleApp
                 }
             }
 
-            foreach (var btn in keyboardButtons.Values)
-            {
-                btn.Background = (SolidColorBrush)new BrushConverter().ConvertFrom("#818384");
-            }
-
+            ResetKeyboardColors(this);
             PickNewTargetWord();
+        }
+
+        private void ResetKeyboardColors(DependencyObject parent)
+        {
+            for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+            {
+                var child = VisualTreeHelper.GetChild(parent, i);
+                if (child is Button btn)
+                {
+                    btn.Background = (SolidColorBrush)new BrushConverter().ConvertFrom("#818384");
+                }
+                ResetKeyboardColors(child);
+            }
         }
 
         private void ExitButton_Click(object sender, RoutedEventArgs e)
@@ -327,31 +318,32 @@ namespace WordleApp
 
                 string letterStr = guessChars[i].ToString();
 
-                if (colors[i] == "#3a3a3c")
+                // Przypisywanie liter do odpowiednich list z zachowaniem reguł pierwszeństwa
+                if (colors[i] == "#538d4e")
                 {
-                    if (!incorrectLetters.Contains(letterStr))
+                    if (!correctLetters.Contains(letterStr)) correctLetters.Add(letterStr);
+                    partialLetters.Remove(letterStr);
+                    incorrectLetters.Remove(letterStr);
+                }
+                else if (colors[i] == "#b59f3b")
+                {
+                    if (!correctLetters.Contains(letterStr) && !partialLetters.Contains(letterStr))
+                    {
+                        partialLetters.Add(letterStr);
+                    }
+                    incorrectLetters.Remove(letterStr);
+                }
+                else if (colors[i] == "#3a3a3c")
+                {
+                    if (!correctLetters.Contains(letterStr) && !partialLetters.Contains(letterStr) && !incorrectLetters.Contains(letterStr))
                     {
                         incorrectLetters.Add(letterStr);
                     }
                 }
-
-                if (keyboardButtons.ContainsKey(letterStr))
-                {
-                    var btn = keyboardButtons[letterStr];
-                    string currentBg = btn.Background.ToString();
-
-                    if (colors[i] == "#538d4e")
-                    {
-                        btn.Background = (SolidColorBrush)new BrushConverter().ConvertFrom("#538d4e");
-                    }
-                    else if (colors[i] == "#b59f3b" && currentBg != "#FF538D4E")
-                    {
-                        btn.Background = (SolidColorBrush)new BrushConverter().ConvertFrom("#b59f3b");
-                    }
-                }
             }
 
-            ApplyIncorrectKeysBackground();
+            // Odświeżenie kolorów całej klawiatury ekranowej
+            ApplyKeyboardColors();
 
             if (guess == targetWord)
             {
@@ -374,21 +366,40 @@ namespace WordleApp
             }
         }
 
-        private void ApplyIncorrectKeysBackground()
+        private void ApplyKeyboardColors()
         {
-            foreach (var kvp in keyboardButtons)
-            {
-                string letter = kvp.Key;
-                Button btn = kvp.Value;
+            UpdateKeyboardColors(this);
+        }
 
-                if (incorrectLetters.Contains(letter))
+        private void UpdateKeyboardColors(DependencyObject parent)
+        {
+            for (int i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+            {
+                var child = VisualTreeHelper.GetChild(parent, i);
+                if (child is Button btn)
                 {
-                    string currentBg = btn.Background.ToString();
-                    if (currentBg != "#FF538D4E" && currentBg != "#FFB59F3B")
+                    string keyText = (btn.Tag as string) ?? (btn.Content?.ToString());
+
+                    if (!string.IsNullOrEmpty(keyText) && keyText.Length == 1)
                     {
-                        btn.Background = (SolidColorBrush)new BrushConverter().ConvertFrom("#000000");
+                        string upperKey = keyText.ToUpperInvariant();
+
+                        // Kolejność sprawdzenia gwarantuje nadrzędność zielonego nad pomarańczowym i czarnym
+                        if (correctLetters.Contains(upperKey))
+                        {
+                            btn.Background = (SolidColorBrush)new BrushConverter().ConvertFrom("#538d4e");
+                        }
+                        else if (partialLetters.Contains(upperKey))
+                        {
+                            btn.Background = (SolidColorBrush)new BrushConverter().ConvertFrom("#b59f3b");
+                        }
+                        else if (incorrectLetters.Contains(upperKey))
+                        {
+                            btn.Background = Brushes.Black;
+                        }
                     }
                 }
+                UpdateKeyboardColors(child);
             }
         }
     }
